@@ -6,6 +6,7 @@ use warnings;
 use LWP::Simple;
 use pQuery;
 use DateTime::Format::Flexible;
+use JSON;
 
 use Moose;
 
@@ -40,41 +41,23 @@ sub as_html {
 sub distributions {
     my $self = shift;
 
-    my $page = get $self->author_cpan_url;
+    my $page =
+      get sprintf 'http://api.metacpan.org/dist/_search?q=author:"%s"',
+      $self->author_id;
 
-    my $dists = pQuery($page)->find('table:eq(1) tr');
+    my $json = from_json($page);
 
-    my @dists;
+    return map { {
+            name    => $_->{name},
+            version => $_->{version},
+            url     => 'http://search.cpan.org/dist/' . $_->{name},
+            date    => DateTime::Format::Flexible->parse_datetime(
+                $_->{release_date}
+            ),
+        }
+      }
+      map { $_->{_source} } @{ $json->{hits}{hits} };
 
-    $dists->each(
-        sub {
-            return unless shift;    # first one is headers
-
-            my $row  = pQuery($_);
-            my $name = $row->find('td:eq(0) a')->text();
-
-            $name =~ s/-v?([\d._]*)$//;    # remove version
-
-            my $version = $1;
-
-            my $url = "http://search.cpan.org/dist/$name";
-
-            $name =~ s/-/::/g;
-
-            my $desc = $row->find('td:eq(1)')->text();
-            my $date = DateTime::Format::Flexible->parse_datetime(
-                $row->find('td:eq(3)')->text );
-
-            push @dists,
-              { name    => $name,
-                url     => $url,
-                desc    => $desc,
-                date    => $date,
-                version => $version,
-              };
-        } );
-
-    return @dists;
 }
 
 no Moose;
@@ -114,8 +97,14 @@ template distribution => sub {
                 $dist->{name};
             }
         }
-        div { class is 'version';      $dist->{version} }
-        div { class is 'release_date'; $dist->{date}->strftime('%b %e, %Y') };
+        div {
+            class is 'version';
+            $dist->{version};
+        }
+        div {
+            class is 'release_date';
+            $dist->{date}->strftime('%b %e, %Y');
+        };
     }
 };
 
